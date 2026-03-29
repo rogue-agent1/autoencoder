@@ -1,46 +1,73 @@
 #!/usr/bin/env python3
-"""Simple autoencoder for dimensionality reduction."""
+"""Autoencoder neural network for dimensionality reduction."""
 import sys, math, random
 
-def sigmoid(x): return 1/(1+math.exp(-max(-500,min(500,x))))
+def sigmoid(x): return 1.0 / (1.0 + math.exp(-max(-500, min(500, x))))
+def sigmoid_d(x): return x * (1 - x)
+
+class Layer:
+    def __init__(self, n_in, n_out):
+        self.W = [[random.gauss(0, math.sqrt(2.0/n_in)) for _ in range(n_in)] for _ in range(n_out)]
+        self.b = [0.0]*n_out; self.out = []; self.inp = []
+    def forward(self, x):
+        self.inp = x; self.out = []
+        for i in range(len(self.b)):
+            s = self.b[i] + sum(self.W[i][j]*x[j] for j in range(len(x)))
+            self.out.append(sigmoid(s))
+        return self.out
 
 class Autoencoder:
-    def __init__(self, input_dim, hidden_dim):
-        self.id, self.hd = input_dim, hidden_dim
-        s = math.sqrt(2.0/input_dim)
-        self.W1 = [[random.gauss(0,s) for _ in range(input_dim)] for _ in range(hidden_dim)]
-        self.b1 = [0]*hidden_dim
-        self.W2 = [[random.gauss(0,s) for _ in range(hidden_dim)] for _ in range(input_dim)]
-        self.b2 = [0]*input_dim
-    def encode(self, x):
-        return [sigmoid(sum(self.W1[j][k]*x[k] for k in range(self.id))+self.b1[j]) for j in range(self.hd)]
-    def decode(self, h):
-        return [sigmoid(sum(self.W2[j][k]*h[k] for k in range(self.hd))+self.b2[j]) for j in range(self.id)]
+    def __init__(self, dims, lr=0.1):
+        self.layers = []; self.lr = lr
+        for i in range(len(dims)-1): self.layers.append(Layer(dims[i], dims[i+1]))
+        self.bottleneck_idx = len(dims)//2 - 1
+
     def forward(self, x):
-        self.h = self.encode(x); self.out = self.decode(self.h); return self.out
-    def train(self, X, epochs=100, lr=0.5):
-        for _ in range(epochs):
-            total_loss = 0
-            for x in X:
-                out = self.forward(x)
-                err = [out[j]-x[j] for j in range(self.id)]
-                total_loss += sum(e**2 for e in err)
-                d_out = [err[j]*out[j]*(1-out[j]) for j in range(self.id)]
-                d_h = [sum(d_out[j]*self.W2[j][k] for j in range(self.id))*self.h[k]*(1-self.h[k]) for k in range(self.hd)]
-                for j in range(self.id):
-                    for k in range(self.hd): self.W2[j][k] -= lr*d_out[j]*self.h[k]
-                    self.b2[j] -= lr*d_out[j]
-                for j in range(self.hd):
-                    for k in range(self.id): self.W1[j][k] -= lr*d_h[j]*x[k]
-                    self.b1[j] -= lr*d_h[j]
-            if _ % 100 == 0: print(f"Epoch {_}: loss={total_loss/len(X):.4f}")
+        for layer in self.layers: x = layer.forward(x)
+        return x
+
+    def encode(self, x):
+        for i in range(self.bottleneck_idx + 1): x = self.layers[i].forward(x)
+        return x
+
+    def train_step(self, x):
+        output = self.forward(x)
+        deltas = [None]*len(self.layers)
+        L = self.layers[-1]
+        deltas[-1] = [(x[i]-output[i])*sigmoid_d(output[i]) for i in range(len(output))]
+        for l in range(len(self.layers)-2, -1, -1):
+            layer = self.layers[l]; nxt = self.layers[l+1]
+            deltas[l] = [sum(deltas[l+1][j]*nxt.W[j][i] for j in range(len(nxt.b)))*sigmoid_d(layer.out[i]) for i in range(len(layer.b))]
+        for l, layer in enumerate(self.layers):
+            for i in range(len(layer.b)):
+                for j in range(len(layer.W[i])): layer.W[i][j] += self.lr*deltas[l][i]*layer.inp[j]
+                layer.b[i] += self.lr*deltas[l][i]
+        return sum((x[i]-output[i])**2 for i in range(len(x)))/len(x)
 
 def main():
     random.seed(42)
-    X = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-    ae = Autoencoder(4, 2); ae.train(X, epochs=500, lr=1.0)
-    for x in X:
-        h = ae.encode(x); out = ae.forward(x)
-        print(f"  {x} -> encoded: [{h[0]:.2f},{h[1]:.2f}] -> [{','.join(f'{o:.2f}' for o in out)}]")
+    # Generate data: 8D with structure
+    data = []
+    for _ in range(100):
+        a, b = random.gauss(0,1), random.gauss(0,1)
+        data.append([a, b, a+b, a-b, a*0.5, b*0.5, a+0.1*random.gauss(0,1), b+0.1*random.gauss(0,1)])
+    # Normalize to [0,1]
+    for j in range(8):
+        mn = min(d[j] for d in data); mx = max(d[j] for d in data)
+        r = mx - mn or 1
+        for d in data: d[j] = (d[j]-mn)/r
+
+    ae = Autoencoder([8, 4, 2, 4, 8], lr=0.5)
+    print("=== Autoencoder (8D -> 2D -> 8D) ===")
+    for epoch in range(200):
+        loss = sum(ae.train_step(d) for d in data)/len(data)
+        if epoch % 50 == 0: print(f"Epoch {epoch}: MSE={loss:.6f}")
+
+    print("\nEncoded samples (2D):")
+    for i in range(5):
+        enc = ae.encode(data[i])
+        rec = ae.forward(data[i])
+        err = sum((data[i][j]-rec[j])**2 for j in range(8))/8
+        print(f"  [{enc[0]:.3f}, {enc[1]:.3f}] (recon error={err:.4f})")
 
 if __name__ == "__main__": main()

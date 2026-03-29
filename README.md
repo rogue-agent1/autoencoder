@@ -1,9 +1,13 @@
-# Autoencoder
+# Autoencoder from Scratch
 
-Autoencoder — zero-dependency Python implementation.
+Autoencoder from Scratch — zero-dependency, single-file Python CLI.
 
 ## Usage
 
 ```bash
-python3 autoencoder.py
+python3 autoencoder.py --help
 ```
+
+## License
+
+MIT
