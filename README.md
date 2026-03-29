@@ -1,11 +1,9 @@
-# autoencoder
+# Autoencoder
 
-Simple autoencoder for dimensionality reduction.
-
-Zero dependencies. Python 3.8+.
+Autoencoder — zero-dependency Python implementation.
 
 ## Usage
 
 ```bash
-python3 autoencoder.py --help
+python3 autoencoder.py
 ```
